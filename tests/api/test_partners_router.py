@@ -222,6 +222,20 @@ class TestSoulLibraryEndpoints:
         assert client.delete("/api/v1/partners/souls/custom-soul").status_code == 200
         assert client.get("/api/v1/partners/souls/custom-soul").status_code == 404
 
+    def test_soul_cjk_id_is_ascii_safe(self, client):
+        # A pure-CJK soul name must not become a non-ASCII (unreachable) id: the
+        # server slugs it authoritatively and the returned id is URL-safe.
+        res = client.post(
+            "/api/v1/partners/souls",
+            json={"id": "我的灵魂", "name": "我的灵魂", "content": "# Soul"},
+        )
+        assert res.status_code == 200
+        soul_id = res.json()["id"]
+        assert soul_id.isascii() and soul_id.startswith("soul-")
+        # …and the soul is reachable / deletable by that returned id.
+        assert client.get(f"/api/v1/partners/souls/{soul_id}").status_code == 200
+        assert client.delete(f"/api/v1/partners/souls/{soul_id}").status_code == 200
+
     def test_soul_sources_shape(self, client):
         body = client.get("/api/v1/partners/soul-sources").json()
         assert "library" in body and "personas" in body

@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
+import hashlib
 import logging
 from pathlib import Path
 import re
@@ -91,15 +92,40 @@ def strip_legacy_global_delivery(channels: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in channels.items() if k not in LEGACY_GLOBAL_DELIVERY_KEYS}
 
 
-def slugify_partner_id(name: str) -> str:
-    # Keep Unicode letters/digits so non-Latin names (e.g. 中文) survive as a
-    # readable id; collapse every other run of characters to a single hyphen.
-    # ``isalnum`` is Unicode-aware and (unlike ``\w``) excludes underscore, so
-    # an id can never collide with the reserved ``_souls`` directory. ASCII is
-    # lower-cased; case-less scripts (CJK, …) pass through unchanged.
-    cleaned = "".join(c if c.isalnum() else "-" for c in name.strip().lower())
+def _slugify_id(name: str, *, fallback: str) -> str:
+    # Ids ride in URLs (``/partners/<id>``, ``/souls/<id>``) and can become
+    # on-disk names, so they must be ASCII/URL-safe: a non-Latin id (e.g.
+    # ``中文``) yields a link the browser can't cleanly display or share, which
+    # left CJK-named entities unreachable. Keep ASCII letters/digits
+    # (lower-cased) and collapse every other run to a single hyphen —
+    # ``isascii`` drops CJK/other scripts and ``isalnum`` excludes underscore,
+    # so a partner id can't collide with the reserved ``_souls`` directory. When
+    # no ASCII survives (a pure-CJK name), fall back to a stable per-name handle
+    # so distinct non-Latin names still get distinct ids while the same name
+    # round-trips to the same id (keeping the create-time duplicate check
+    # meaningful). Only the id is slugged; the entity keeps its display name.
+    stripped = name.strip()
+    cleaned = "".join(c if c.isascii() and c.isalnum() else "-" for c in stripped.lower())
     slug = _HYPHEN_RUN_RE.sub("-", cleaned).strip("-")
-    return slug or "partner"
+    if slug:
+        return slug
+    if not stripped:
+        return fallback
+    digest = hashlib.sha1(stripped.encode("utf-8")).hexdigest()[:8]
+    return f"{fallback}-{digest}"
+
+
+def slugify_partner_id(name: str) -> str:
+    """ASCII/URL-safe partner id derived from a display name (see
+    :func:`_slugify_id`); pure-CJK names get a stable ``partner-<hash>`` id."""
+    return _slugify_id(name, fallback="partner")
+
+
+def slugify_soul_id(name: str) -> str:
+    """ASCII/URL-safe soul-library id. Soul ids ride in ``/souls/<id>`` URLs
+    exactly like partner ids, so they get the same treatment (see
+    :func:`_slugify_id`); pure-CJK names get a stable ``soul-<hash>`` id."""
+    return _slugify_id(name, fallback="soul")
 
 
 def _optional_str_list(value: Any) -> list[str] | None:

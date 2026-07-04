@@ -24,7 +24,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from deeptutor.core.i18n import t
 from deeptutor.partners.config.paths import get_partner_media_dir
 from deeptutor.partners.helpers import safe_filename
-from deeptutor.services.partners import get_partner_manager, slugify_partner_id
+from deeptutor.services.partners import (
+    get_partner_manager,
+    slugify_partner_id,
+    slugify_soul_id,
+)
 from deeptutor.services.partners.manager import (
     LEGACY_GLOBAL_DELIVERY_KEYS,
     PartnerConfig,
@@ -326,9 +330,13 @@ async def list_souls():
 @router.post("/souls")
 async def create_soul(payload: SoulCreateRequest):
     mgr = get_partner_manager()
-    if mgr.get_soul(payload.id):
-        raise HTTPException(status_code=409, detail=t("api.soul_already_exists", name=payload.id))
-    return mgr.create_soul(payload.id, payload.name, payload.content)
+    # Slug the id server-side (authoritative): soul ids ride in ``/souls/<id>``
+    # URLs, so a raw CJK / path-unsafe id (e.g. ``我的灵魂`` or ``a/b``) would be
+    # unreachable or mis-routed. The client uses the returned ``id``.
+    soul_id = slugify_soul_id(payload.id or payload.name)
+    if mgr.get_soul(soul_id):
+        raise HTTPException(status_code=409, detail=t("api.soul_already_exists", name=soul_id))
+    return mgr.create_soul(soul_id, payload.name, payload.content)
 
 
 @router.get("/souls/{soul_id}")
