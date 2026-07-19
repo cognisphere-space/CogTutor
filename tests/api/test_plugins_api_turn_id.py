@@ -122,3 +122,45 @@ def test_published_completion_yields_a_referenceable_conversation_event(monkeypa
     assert conversation_event.turn_id is not None
     assert TURN_ID_PATTERN.match(conversation_event.turn_id)
     assert conversation_event.message_refs == [conversation_event.turn_id]
+
+
+def test_request_session_id_reaches_the_conversation_event(monkeypatch):
+    """``session_id`` is what binds a turn to a handed-off external context."""
+    seen_contexts = _install_probe_capability(monkeypatch)
+    published = _capture_published_events(monkeypatch)
+
+    subscriber = importlib.import_module("deeptutor.integrations.external.subscriber")
+    resolved_for: list[str] = []
+
+    class RecordingStore:
+        def resolve_context_for_session(self, session_id, *args, **kwargs):
+            resolved_for.append(session_id)
+            return None
+
+    monkeypatch.setattr(subscriber, "get_external_store", lambda: RecordingStore())
+
+    response = _client().post(
+        f"/api/v1/plugins/capabilities/{PROBE_CAPABILITY}/execute-stream",
+        json={"content": "hi", "session_id": "sess-abc"},
+    )
+    assert response.status_code == 200
+
+    assert seen_contexts[0].session_id == "sess-abc"
+    assert published[0].metadata["session_id"] == "sess-abc"
+
+    conversation_event = subscriber.build_conversation_event(published[0])
+    assert conversation_event.session_id == "sess-abc"
+    assert resolved_for == ["sess-abc"]
+
+
+def test_absent_session_id_still_gets_one(monkeypatch):
+    """Omitting it must keep the previous behaviour, not emit an empty id."""
+    seen_contexts = _install_probe_capability(monkeypatch)
+    _capture_published_events(monkeypatch)
+
+    response = _client().post(
+        f"/api/v1/plugins/capabilities/{PROBE_CAPABILITY}/execute-stream",
+        json={"content": "hi"},
+    )
+    assert response.status_code == 200
+    assert seen_contexts[0].session_id

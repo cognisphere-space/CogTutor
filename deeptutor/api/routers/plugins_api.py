@@ -349,6 +349,9 @@ async def _execute_capability_stream(
         attachments=attachments,
         config_overrides=body.config,
         language=body.language,
+        # Without this the orchestrator mints a fresh uuid per call, so no two
+        # turns share a session and ``resolve_context_for_session`` never binds.
+        session_id=body.session_id or "",
         metadata={"turn_id": turn_id},
     )
 
