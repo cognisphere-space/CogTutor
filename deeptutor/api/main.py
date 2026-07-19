@@ -144,6 +144,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to start EventBus: {e}")
 
+    # External integration: conversation-event output. Inert unless a
+    # deployment configures an event sink.
+    try:
+        from deeptutor.integrations.external import (
+            get_event_sink_worker,
+            register_conversation_event_publisher,
+        )
+
+        register_conversation_event_publisher()
+        await get_event_sink_worker().start()
+    except Exception as e:
+        logger.warning(f"Failed to start external integration: {e}")
+
     try:
         from deeptutor.services.partners import get_partner_manager
 
@@ -204,6 +217,18 @@ async def lifespan(app: FastAPI):
         logger.info("Partners stopped")
     except Exception as e:
         logger.warning(f"Failed to stop partners: {e}")
+
+    # Stop the external integration before the EventBus it subscribes to.
+    try:
+        from deeptutor.integrations.external import (
+            get_event_sink_worker,
+            unregister_conversation_event_publisher,
+        )
+
+        await get_event_sink_worker().stop()
+        unregister_conversation_event_publisher()
+    except Exception as e:
+        logger.warning(f"Failed to stop external integration: {e}")
 
     # Stop EventBus
     try:
@@ -340,6 +365,14 @@ from deeptutor.multi_user.router import router as multi_user_router  # noqa: E40
 
 # Auth router is public — login/logout/register/status require no token
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
+
+# External integration is public for the same reason auth is: the handoff
+# endpoint is what establishes the session, so it cannot require one.
+from deeptutor.integrations.external.router import (  # noqa: E402
+    router as external_router,
+)
+
+app.include_router(external_router, prefix="/api/v1/external", tags=["external"])
 
 # All other routers require a valid session when AUTH_ENABLED=true.
 # require_auth is a no-op when AUTH_ENABLED=false, so this is safe for local use.
