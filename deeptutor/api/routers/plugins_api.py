@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import time
+import uuid
 from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
@@ -338,6 +339,8 @@ async def _execute_capability_stream(
         for a in body.attachments
     ]
 
+    turn_id = f"turn_{int(time.time() * 1000)}_{uuid.uuid4().hex[:10]}"
+
     ctx = UnifiedContext(
         user_message=body.content,
         enabled_tools=body.tools,
@@ -346,6 +349,7 @@ async def _execute_capability_stream(
         attachments=attachments,
         config_overrides=body.config,
         language=body.language,
+        metadata={"turn_id": turn_id},
     )
 
     event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
