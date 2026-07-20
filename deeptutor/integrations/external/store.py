@@ -140,14 +140,19 @@ class ExternalIntegrationStore:
         return self._row_to_context(row) if row else None
 
     def bind_context_to_session(self, context_id: str, session_id: str) -> bool:
+        """Bind once. A context already bound to a *different* session is left
+        alone — otherwise a second ``/context/bind`` call (or a replayed one)
+        could reattach someone else's context to a new session after the
+        fact. Re-binding to the same session id is a harmless no-op refresh.
+        """
         with self._connection() as connection:
             cursor = connection.execute(
                 """
                 UPDATE external_context
                 SET session_id = ?, bound_at = ?
-                WHERE context_id = ?
+                WHERE context_id = ? AND (session_id IS NULL OR session_id = ?)
                 """,
-                (session_id, _iso(_now()), context_id),
+                (session_id, _iso(_now()), context_id, session_id),
             )
             return cursor.rowcount == 1
 

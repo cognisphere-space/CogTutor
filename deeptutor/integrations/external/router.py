@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import secrets
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Cookie, HTTPException, Query, Response
 from fastapi.responses import RedirectResponse
@@ -28,6 +29,38 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _CONTEXT_COOKIE = "dt_external_context"
+_PENDING_BIND_PARAM = "external_context_pending"
+
+
+def _safe_redirect_path(path: str) -> str:
+    """Confine ``handoff_redirect_path`` to a same-origin relative path.
+
+    The value is deploy-time config (``EXTERNAL_HANDOFF_REDIRECT_PATH``), not
+    request input, but it still ends up as the target of an unauthenticated
+    302. A misconfigured absolute URL, protocol-relative ``//evil.com``, or
+    bare ``evil.com`` would turn every handoff into an open redirect, so this
+    fails closed to ``/`` rather than trusting the value as given.
+    """
+    if not path.startswith("/") or path.startswith("//"):
+        logger.warning("Ignoring unsafe EXTERNAL_HANDOFF_REDIRECT_PATH %r", path)
+        return "/"
+    parts = urlsplit(path)
+    if parts.scheme or parts.netloc:
+        logger.warning("Ignoring unsafe EXTERNAL_HANDOFF_REDIRECT_PATH %r", path)
+        return "/"
+    return path
+
+
+def _with_pending_bind_marker(path: str) -> str:
+    """Append a non-secret marker so the landing page knows to call
+    ``/context/bind`` once it has a session id, instead of falling back to
+    the claim heuristic. The marker carries no id — the actual context stays
+    behind the httponly cookie set alongside this redirect.
+    """
+    parts = urlsplit(path)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    query.append((_PENDING_BIND_PARAM, "1"))
+    return urlunsplit(parts._replace(query=urlencode(query)))
 
 
 async def _exchange_code(code: str) -> dict[str, Any]:
@@ -52,6 +85,25 @@ async def _exchange_code(code: str) -> dict[str, Any]:
             detail=f"Identity provider rejected the handoff code ({response.status_code})",
         )
     return response.json()
+
+
+def _cookie_security() -> tuple[bool, str]:
+    """Match the app's configured cookie security posture (see `auth.py`).
+
+    Reused rather than reinvented: `cookie_secure` is already a generic
+    runtime setting (`AUTH_COOKIE_SECURE` / `data/user/settings`), not
+    specific to the login flow, and the two flags move together — Secure is
+    required by browsers whenever SameSite=None is used to let frontend and
+    backend sit on different origins. Defaults closed (Lax, not Secure) so a
+    plain local HTTP deployment with no config at all still works, matching
+    every other cookie this router sets.
+    """
+    try:
+        from deeptutor.api.routers.auth import _SAMESITE, _SECURE
+
+        return bool(_SECURE), str(_SAMESITE)
+    except Exception:
+        return False, "lax"
 
 
 def _maybe_establish_local_session(
@@ -81,11 +133,13 @@ def _maybe_establish_local_session(
         add_user(username, secrets.token_urlsafe(32), role="user")
     info = get_user_info(username) or {}
     token = create_token(username, info.get("role", "user"), info.get("user_id"))
+    secure, samesite = _cookie_security()
     response.set_cookie(
         key=_COOKIE_NAME,
         value=token,
         httponly=True,
-        samesite="lax",
+        samesite=samesite,
+        secure=secure,
         max_age=_COOKIE_MAX_AGE,
     )
 
@@ -118,18 +172,26 @@ async def complete_handoff(code: str = Query(...)) -> Response:
         get_external_store().save_context(context, user_key=identity.user_key)
         context_id = context.context_id
 
-    response = RedirectResponse(url=config.handoff_redirect_path, status_code=302)
+    redirect_path = _safe_redirect_path(config.handoff_redirect_path)
+    if context_id:
+        redirect_path = _with_pending_bind_marker(redirect_path)
+    response = RedirectResponse(url=redirect_path, status_code=302)
     _maybe_establish_local_session(response, identity)
     if context_id:
         # This cookie is the capability that authorizes /context/{id} and
         # /context/bind for this browser — see _authorize_context. It is not a
         # second delivery channel: the event path resolves a context by
-        # session binding alone and never reads it.
+        # session binding alone and never reads it. Holding it is a bearer
+        # capability with no separate binding to a login session, so it
+        # follows the same Secure/SameSite posture as the rest of the app's
+        # cookies rather than a weaker one of its own.
+        secure, samesite = _cookie_security()
         response.set_cookie(
             key=_CONTEXT_COOKIE,
             value=context_id,
             httponly=True,
-            samesite="lax",
+            samesite=samesite,
+            secure=secure,
             max_age=config.handoff_context_ttl_seconds,
         )
     logger.info(
@@ -141,7 +203,12 @@ async def complete_handoff(code: str = Query(...)) -> Response:
 
 
 class ContextBindRequest(BaseModel):
-    context_id: str
+    # Optional: the browser holds the real context id only in the httponly
+    # handoff cookie, never in JS-reachable storage, so the common caller
+    # (the landing page reacting to the pending-bind marker) has no id to
+    # send and relies on the cookie alone. A caller that already knows the
+    # id (e.g. a future non-cookie integration) may still pass it explicitly.
+    context_id: str | None = None
     session_id: str
 
 
@@ -173,13 +240,21 @@ async def bind_context(
 
     Preferred over the store's first-turn claim whenever the frontend knows
     its session id: the claim is a heuristic, this is a statement of fact.
+
+    ``context_id`` defaults to whatever the handoff cookie names, which is
+    the only copy of it the browser ever holds. A caller with neither an
+    explicit id nor a cookie has nothing to bind — that is not an error, it
+    just means this browser never went through a handoff.
     """
-    _authorize_context(body.context_id, dt_external_context)
+    context_id = body.context_id or dt_external_context
+    if not context_id:
+        return {"ok": False, "context_id": None, "session_id": body.session_id}
+    _authorize_context(context_id, dt_external_context)
     store = get_external_store()
-    if store.get_context(body.context_id) is None:
+    if store.get_context(context_id) is None:
         raise HTTPException(status_code=404, detail="Unknown context_id")
-    bound = store.bind_context_to_session(body.context_id, body.session_id)
-    return {"ok": bound, "context_id": body.context_id, "session_id": body.session_id}
+    bound = store.bind_context_to_session(context_id, body.session_id)
+    return {"ok": bound, "context_id": context_id, "session_id": body.session_id}
 
 
 @router.get("/context/{context_id}")

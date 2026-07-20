@@ -61,6 +61,32 @@ def test_explicit_bind_wins_over_claiming(store: ExternalIntegrationStore) -> No
     assert resolved.context_id == "ctx-a"
 
 
+def test_bind_does_not_steal_a_context_already_bound_elsewhere(
+    store: ExternalIntegrationStore,
+) -> None:
+    store.save_context(make_context("ctx-a"))
+    store.bind_context_to_session("ctx-a", "session-1")
+
+    stolen = store.bind_context_to_session("ctx-a", "session-2")
+
+    assert stolen is False
+    resolved = store.context_for_session("session-1")
+    assert resolved is not None
+    assert resolved.context_id == "ctx-a"
+    assert store.context_for_session("session-2") is None
+
+
+def test_bind_to_the_same_session_twice_is_a_no_op_refresh(
+    store: ExternalIntegrationStore,
+) -> None:
+    store.save_context(make_context("ctx-a"))
+    store.bind_context_to_session("ctx-a", "session-1")
+
+    again = store.bind_context_to_session("ctx-a", "session-1")
+
+    assert again is True
+
+
 def test_only_one_session_claims_a_context(store: ExternalIntegrationStore) -> None:
     """The claim is a race by construction; it must at least be an atomic one."""
     store.save_context(make_context("ctx-only"))
@@ -267,7 +293,11 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(router_module, "get_external_store", lambda: fresh)
 
     monkeypatch.setenv("EXTERNAL_HANDOFF_EXCHANGE_URL", "https://host.invalid/exchange")
-    monkeypatch.setenv("EXTERNAL_HANDOFF_REDIRECT_PATH", "/chat")
+    # A real workspace route, not a placeholder: web/app/(workspace)/page.tsx
+    # only forwards a fixed set of query params on its client-side redirect,
+    # so asserting against a route that actually exists in the app is what
+    # catches a marker silently getting dropped there.
+    monkeypatch.setenv("EXTERNAL_HANDOFF_REDIRECT_PATH", "/home")
 
     app = FastAPI()
     app.include_router(router_module.router, prefix="/api/v1/external")
@@ -297,9 +327,127 @@ def test_handoff_stores_context_and_redirects(monkeypatch, client) -> None:
     )
 
     assert response.status_code == 302
-    assert response.headers["location"] == "/chat"
+    # The marker carries no id — just tells the landing page to try binding
+    # once it has a session id, instead of falling back to the claim heuristic.
+    assert response.headers["location"] == "/home?external_context_pending=1"
     assert store.get_context("ctx-handoff") is not None
     assert response.cookies.get("dt_external_context") == "ctx-handoff"
+
+
+def test_context_cookie_follows_the_app_cookie_security_setting(
+    monkeypatch, client
+) -> None:
+    """The context cookie is a bearer capability with no login binding — it
+    must not default to a weaker posture than the rest of the app's cookies
+    just because this router forgot to ask.
+
+    ``_cookie_security`` itself is a two-line lazy import of
+    ``deeptutor.api.routers.auth``'s own computed flags (see that module for
+    where ``cookie_secure`` is sourced); this test pins what the handoff
+    endpoint *does* with whatever that returns, without dragging in the rest
+    of the auth router (unrelated optional deps like python-multipart
+    shouldn't gate a test about cookie flags).
+    """
+    test_client, _ = client
+    from deeptutor.integrations.external import router as router_module
+
+    async def fake_exchange(code: str) -> dict:
+        return _exchange_result()
+
+    monkeypatch.setattr(router_module, "_exchange_code", fake_exchange)
+    monkeypatch.setattr(router_module, "_cookie_security", lambda: (True, "none"))
+
+    response = test_client.get(
+        "/api/v1/external/handoff/complete", params={"code": "one-time-code"}
+    )
+
+    set_cookie_headers = response.headers.get_list("set-cookie")
+    context_cookie = next(h for h in set_cookie_headers if h.startswith("dt_external_context="))
+    assert "Secure" in context_cookie
+    assert "samesite=none" in context_cookie.lower()
+
+
+def test_cookie_security_falls_back_to_lax_when_auth_module_is_unavailable(
+    monkeypatch,
+) -> None:
+    """Any import failure (e.g. an optional dep missing in a minimal deploy)
+    must fail closed to today's behavior, not raise out of the handoff."""
+    import builtins
+
+    from deeptutor.integrations.external import router as router_module
+
+    real_import = builtins.__import__
+
+    def blocked_import(name, *args, **kwargs):
+        if name == "deeptutor.api.routers.auth":
+            raise RuntimeError("simulated: optional dependency unavailable")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
+
+    assert router_module._cookie_security() == (False, "lax")
+
+
+@pytest.mark.parametrize(
+    "unsafe_path",
+    [
+        "https://evil.invalid/",
+        "//evil.invalid",
+        "//evil.invalid/path",
+        "evil.invalid",
+        "",
+    ],
+)
+def test_safe_redirect_path_rejects_anything_not_same_origin(unsafe_path) -> None:
+    from deeptutor.integrations.external import router as router_module
+
+    assert router_module._safe_redirect_path(unsafe_path) == "/"
+
+
+@pytest.mark.parametrize("safe_path", ["/", "/home", "/home?foo=bar"])
+def test_safe_redirect_path_passes_through_relative_paths(safe_path) -> None:
+    from deeptutor.integrations.external import router as router_module
+
+    assert router_module._safe_redirect_path(safe_path) == safe_path
+
+
+def test_handoff_redirect_rejects_a_misconfigured_absolute_url(
+    monkeypatch, client
+) -> None:
+    """A deploy setting EXTERNAL_HANDOFF_REDIRECT_PATH to an absolute URL must
+    not turn the handoff into an open redirect."""
+    test_client, _ = client
+    from deeptutor.integrations.external import router as router_module
+
+    monkeypatch.setenv("EXTERNAL_HANDOFF_REDIRECT_PATH", "https://evil.invalid/")
+
+    async def fake_exchange(code: str) -> dict:
+        return _exchange_result()
+
+    monkeypatch.setattr(router_module, "_exchange_code", fake_exchange)
+
+    response = test_client.get(
+        "/api/v1/external/handoff/complete", params={"code": "one-time-code"}
+    )
+
+    assert response.headers["location"] == "/?external_context_pending=1"
+
+
+def test_handoff_redirect_has_no_marker_without_a_context(monkeypatch, client) -> None:
+    test_client, _ = client
+    from deeptutor.integrations.external import router as router_module
+
+    async def fake_exchange(code: str) -> dict:
+        identity = ExternalIdentity(issuer="host", subject="user-1")
+        return {"identity": identity.model_dump(mode="json")}  # no context
+
+    monkeypatch.setattr(router_module, "_exchange_code", fake_exchange)
+
+    response = test_client.get(
+        "/api/v1/external/handoff/complete", params={"code": "one-time-code"}
+    )
+
+    assert response.headers["location"] == "/home"
 
 
 def test_handoff_surfaces_a_rejected_code_as_502(monkeypatch, client) -> None:
@@ -379,6 +527,45 @@ def test_binding_a_context_requires_the_handoff_cookie(client) -> None:
     ok = test_client.post("/api/v1/external/context/bind", json=body)
     assert ok.status_code == 200
     assert store.context_for_session("session-hijack") is not None
+
+
+def test_binding_without_a_context_id_uses_the_handoff_cookie(client) -> None:
+    """The pending-bind landing page never learns the id (httponly cookie);
+    it only ever sends session_id, so the cookie alone must be enough."""
+    test_client, store = client
+    store.save_context(make_context("ctx-cookie-only"))
+    test_client.cookies.set("dt_external_context", "ctx-cookie-only")
+
+    response = test_client.post(
+        "/api/v1/external/context/bind", json={"session_id": "session-1"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "context_id": "ctx-cookie-only",
+        "session_id": "session-1",
+    }
+    assert store.context_for_session("session-1") is not None
+
+
+def test_binding_without_a_context_id_or_cookie_is_a_no_op(client) -> None:
+    """A browser that never went through a handoff has nothing to bind —
+    that's the common case, not an error the generic landing-page call
+    should surface."""
+    test_client, store = client
+
+    response = test_client.post(
+        "/api/v1/external/context/bind", json={"session_id": "session-1"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": False,
+        "context_id": None,
+        "session_id": "session-1",
+    }
+    assert store.context_for_session("session-1") is None
 
 
 # -------------------------------------------------------------------- contract

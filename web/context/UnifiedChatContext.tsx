@@ -36,6 +36,10 @@ import {
   shouldAppendEventContent,
 } from "@/lib/stream";
 import { hasPendingAskUserInMessages } from "@/lib/ask-user-state";
+import {
+  bindPendingExternalContext,
+  capturePendingExternalContextMarker,
+} from "@/lib/external-context";
 import { notify } from "@/lib/notifications";
 import i18n from "i18next";
 import {
@@ -941,6 +945,13 @@ export function UnifiedChatProvider({
     stateRef.current = state;
   }, [state]);
 
+  // Runs once per app load. If this browser just landed here from an
+  // external handoff, remember it so the first "session" event below can
+  // bind it explicitly instead of leaving it to the server's claim guess.
+  useEffect(() => {
+    capturePendingExternalContextMarker();
+  }, []);
+
   useEffect(
     () => () => {
       runnersRef.current.forEach(({ client }) => client.disconnect());
@@ -1019,6 +1030,7 @@ export function UnifiedChatProvider({
             turnId,
           });
           moveRunner(effectiveKey, sessionId);
+          bindPendingExternalContext(sessionId);
         }
         return;
       }
