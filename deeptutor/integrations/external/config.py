@@ -52,6 +52,14 @@ class ExternalIntegrationConfig:
     viewer_allowed_origin: str = ""
     viewer_sandbox: str = "allow-scripts allow-same-origin"
 
+    # Sidebar brand mark: a small decorative, non-interactive point-cloud
+    # rendered in place of the default logo. Fully generic — this module
+    # never learns what the points represent, only that a deployment handed
+    # it a `{"points": [{"x","y","z","weight"?}]}` document to draw.
+    brand_mark_enabled: bool = False
+    brand_mark_href: str = ""
+    brand_mark_data_url: str = ""
+
     @property
     def handoff_enabled(self) -> bool:
         return bool(self.handoff_exchange_url)
@@ -78,4 +86,7 @@ def get_external_config() -> ExternalIntegrationConfig:
         viewer_allowed_origin=_env("EXTERNAL_VIEWER_ALLOWED_ORIGIN"),
         viewer_sandbox=_env("EXTERNAL_VIEWER_SANDBOX")
         or "allow-scripts allow-same-origin",
+        brand_mark_enabled=_env_bool("EXTERNAL_BRAND_MARK_ENABLED"),
+        brand_mark_href=_env("EXTERNAL_BRAND_MARK_HREF"),
+        brand_mark_data_url=_env("EXTERNAL_BRAND_MARK_DATA_URL"),
     )

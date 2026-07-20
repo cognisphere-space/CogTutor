@@ -377,6 +377,24 @@ async def viewer_handle(
     return {"context_id": dt_external_context}
 
 
+@router.get("/brand/config")
+async def brand_config() -> dict[str, Any]:
+    """Config for the sidebar brand mark. Empty unless a deployment sets it.
+
+    ``href`` and ``data_url`` are opaque deployment config, same as the
+    viewer's — this endpoint does not fetch ``data_url`` itself, it only
+    hands the frontend the address to fetch it from directly.
+    """
+    config = get_external_config()
+    return {
+        "enabled": config.brand_mark_enabled
+        and bool(config.brand_mark_href)
+        and bool(config.brand_mark_data_url),
+        "href": config.brand_mark_href,
+        "data_url": config.brand_mark_data_url,
+    }
+
+
 @router.get("/events/status")
 async def events_status() -> dict[str, Any]:
     """Outbox health — for operators, not for the host product's domain logic."""

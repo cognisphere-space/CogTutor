@@ -26,6 +26,8 @@ import {
 import { useTranslation } from "react-i18next";
 import SessionList from "@/components/SessionList";
 import { VersionBadge } from "@/components/sidebar/VersionBadge";
+import { BrandMarkCanvas } from "@/components/sidebar/BrandMarkCanvas";
+import { useExternalBrandMark } from "@/hooks/useExternalBrandMark";
 import type { SessionSummary } from "@/lib/session-api";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useCapabilityAccess } from "@/components/access/CapabilityAccessContext";
@@ -147,6 +149,9 @@ export function SidebarShell({
   const { has } = useCapabilityAccess();
   const { sidebarCollapsed: collapsed, setSidebarCollapsed: setCollapsed } =
     useAppShell();
+  // `undefined` = still loading, `null` = no deployment config — both fall
+  // back to the default logo/banner; only a resolved value swaps it in.
+  const brandMark = useExternalBrandMark();
 
   const navLocked = (item: NavEntry) =>
     item.requires ? !has(item.requires) : false;
@@ -192,17 +197,21 @@ export function SidebarShell({
         {/* Header: logo + collapse toggle (toggle replaces logo on hover) */}
         <div className="relative mb-2 flex h-9 w-9 items-center justify-center">
           <Link
-            href="/"
-            aria-label="DeepTutor"
+            href={brandMark ? brandMark.href : "/"}
+            aria-label={brandMark ? t("Knowledge planet") : "DeepTutor"}
             className="flex items-center justify-center transition-opacity duration-150 group-hover/sb:opacity-0"
           >
-            <Image
-              src="/logo.png"
-              alt="DeepTutor"
-              width={22}
-              height={22}
-              className="h-[22px] w-[22px] rounded-md"
-            />
+            {brandMark ? (
+              <BrandMarkCanvas variant="icon" points={brandMark.points} className="rounded-md" />
+            ) : (
+              <Image
+                src="/logo.png"
+                alt="DeepTutor"
+                width={22}
+                height={22}
+                className="h-[22px] w-[22px] rounded-md"
+              />
+            )}
           </Link>
           <button
             onClick={() => setCollapsed(false)}
@@ -324,22 +333,36 @@ export function SidebarShell({
     <aside className="flex w-[220px] h-screen shrink-0 flex-col bg-[var(--secondary)] transition-all duration-200">
       {/* Header: logo + collapse toggle */}
       <div className="flex h-14 items-center justify-between px-4">
-        <Link href="/" className="group flex items-center gap-1.5">
-          <Image
-            src="/logo.png"
-            alt="DeepTutor"
-            width={22}
-            height={22}
-            className="h-[22px] w-[22px] transition-transform duration-200 group-hover:scale-105"
-          />
-          <Image
-            src="/banner.png"
-            alt="DeepTutor"
-            width={897}
-            height={236}
-            priority
-            className="h-[22px] w-auto transition-transform duration-200 group-hover:scale-105"
-          />
+        <Link
+          href={brandMark ? brandMark.href : "/"}
+          aria-label={brandMark ? t("Knowledge planet") : "DeepTutor"}
+          className="group flex items-center gap-1.5"
+        >
+          {brandMark ? (
+            <BrandMarkCanvas
+              variant="square"
+              points={brandMark.points}
+              className="rounded-lg transition-transform duration-200 group-hover:scale-105"
+            />
+          ) : (
+            <>
+              <Image
+                src="/logo.png"
+                alt="DeepTutor"
+                width={22}
+                height={22}
+                className="h-[22px] w-[22px] transition-transform duration-200 group-hover:scale-105"
+              />
+              <Image
+                src="/banner.png"
+                alt="DeepTutor"
+                width={897}
+                height={236}
+                priority
+                className="h-[22px] w-auto transition-transform duration-200 group-hover:scale-105"
+              />
+            </>
+          )}
         </Link>
         <button
           onClick={() => setCollapsed(true)}
