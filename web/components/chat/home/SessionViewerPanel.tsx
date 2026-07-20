@@ -34,6 +34,7 @@ import {
   ExternalLink,
   FileUp,
   Globe,
+  LayoutGrid,
   Loader2,
   MessageSquarePlus,
   Paperclip,
@@ -54,6 +55,12 @@ import SubagentTabBody from "@/components/chat/home/SubagentTabBody";
 import type { QuizFollowupTabContext } from "@/context/QuizFollowupContext";
 import type { GeogebraTabPayload } from "@/context/GeogebraTabContext";
 import { apiUrl } from "@/lib/api";
+import {
+  fetchExternalViewerConfig,
+  fetchExternalViewerContextId,
+  pushExternalViewerSelection,
+  VIEWER_PROTOCOL_VERSION,
+} from "@/lib/external-viewer";
 import type { MessageAttachment } from "@/context/UnifiedChatContext";
 import type { StreamEvent } from "@/lib/unified-ws";
 
@@ -147,6 +154,15 @@ type ViewerTab =
       label: string;
       callId: string;
       events: StreamEvent[];
+    }
+  | {
+      kind: "external";
+      id: string;
+      label: string;
+      url: string;
+      contextId: string;
+      allowedOrigin: string;
+      sandbox: string;
     };
 
 export interface SessionViewerPanelHandle {
@@ -193,6 +209,8 @@ function geogebraTabIdFor(payloadId: string): string {
 function subagentTabIdFor(callId: string): string {
   return `subagent:${callId}`;
 }
+
+const EXTERNAL_VIEWER_TAB_ID = "external-viewer";
 
 function hostnameFor(url: string): string {
   try {
@@ -435,6 +453,56 @@ function SessionViewerPanelInner(
     [onAutoOpen],
   );
 
+  // Generic embedded viewer tab (docs: `external_viewer`). Detected once per
+  // session — a config fetch (is a viewer configured at all?) followed by a
+  // handle fetch (did this browser go through a handoff?) — then revealed
+  // once, same one-shot pattern as the subagent tab above. There is no
+  // "navigate the viewer" channel: the only outbound message this tab ever
+  // sends the iframe is the bootstrap `viewer.init`, replied to its
+  // `viewer.ready`; the only inbound one it acts on is `selection_changed`,
+  // forwarded verbatim to this session's stored context (see
+  // `lib/external-viewer.ts`).
+  //
+  // Inserting the tab is idempotent, so it can safely run again; *revealing*
+  // it is not. This effect re-runs whenever `t` or a callback changes
+  // identity, and an unconditional reveal would yank the user out of the
+  // file or geogebra tab they were reading, mid-session, for no new reason.
+  const externalTabRevealedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    (async () => {
+      const config = await fetchExternalViewerConfig();
+      if (cancelled || !config?.enabled || !config.url) return;
+      const contextId = await fetchExternalViewerContextId();
+      if (cancelled || !contextId) return;
+      setTabs((prev) => {
+        if (prev.some((tab) => tab.id === EXTERNAL_VIEWER_TAB_ID)) return prev;
+        const next: ViewerTab = {
+          kind: "external",
+          id: EXTERNAL_VIEWER_TAB_ID,
+          label: config.title || t("Viewer"),
+          url: config.url,
+          contextId,
+          allowedOrigin: config.allowedOrigin,
+          sandbox: config.sandbox,
+        };
+        return [...prev, next];
+      });
+      // Guarded here rather than at the top of the effect on purpose: under
+      // Strict Mode the first run is cancelled mid-flight, so a guard set
+      // before the awaits would make the surviving run bail out and the tab
+      // would never appear at all.
+      if (externalTabRevealedRef.current === sessionId) return;
+      externalTabRevealedRef.current = sessionId;
+      setActiveTabId(EXTERNAL_VIEWER_TAB_ID);
+      onAutoOpen();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, onAutoOpen, t]);
+
   // Open the panel and return to the Activity home (where the
   // capability-config card surfaces). Used by the send-gate.
   const focusActivityHome = useCallback(() => {
@@ -573,6 +641,15 @@ function SessionViewerPanelInner(
             tabEvents={activeTab.events}
             sessionId={sessionId}
           />
+        ) : activeTab?.kind === "external" ? (
+          <ExternalViewerTabBody
+            key={activeTab.id}
+            url={activeTab.url}
+            title={activeTab.label}
+            contextId={activeTab.contextId}
+            allowedOrigin={activeTab.allowedOrigin}
+            sandbox={activeTab.sandbox}
+          />
         ) : (
           <ActivityHome
             activity={activity}
@@ -648,7 +725,9 @@ function TabBar({
                 ? MessageSquarePlus
                 : tab.kind === "geogebra"
                   ? Compass
-                  : Paperclip;
+                  : tab.kind === "external"
+                    ? LayoutGrid
+                    : Paperclip;
           return (
             <div
               key={tab.id}
@@ -1068,6 +1147,96 @@ function GeogebraTabBody({ script }: { script: string }) {
         width={560}
         height={520}
         className="m-0 border-0 bg-transparent"
+      />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  External viewer tab body — generic iframe, opaque to this app      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Bridges exactly two message types with the iframe, both defined by the
+ * embedder (see `docs/deeptutor-integration.md` §3.3 upstream, and
+ * `lib/external-viewer.ts` here):
+ *
+ *  - `viewer.ready` (iframe -> here) is replied to with `viewer.init`,
+ *    carrying only the `context_id` needed to bootstrap it.
+ *  - `selection_changed` (iframe -> here) is forwarded to `/context/payload`
+ *    without being read past its outer shape.
+ *
+ * There is deliberately no reverse "navigate the viewer" message — this
+ * component never posts anything to the iframe except the one bootstrap
+ * reply, and only to `allowedOrigin`, never `"*"`.
+ */
+function ExternalViewerTabBody({
+  url,
+  title,
+  contextId,
+  allowedOrigin,
+  sandbox,
+}: {
+  url: string;
+  /** The tab's own label — already the deployment's title or a translated
+   *  fallback, so the iframe's accessible name matches what the tab says. */
+  title: string;
+  contextId: string;
+  allowedOrigin: string;
+  sandbox: string;
+}) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const postInit = useCallback(() => {
+    if (!allowedOrigin) return;
+    iframeRef.current?.contentWindow?.postMessage(
+      {
+        protocol_version: VIEWER_PROTOCOL_VERSION,
+        type: "viewer.init",
+        context_id: contextId,
+        payload: {},
+      },
+      allowedOrigin,
+    );
+  }, [allowedOrigin, contextId]);
+
+  useEffect(() => {
+    if (!allowedOrigin) return;
+    function onMessage(event: MessageEvent) {
+      if (event.origin !== allowedOrigin) return;
+      // Origin alone is not enough: any other window of that origin — a popup
+      // it opened, another tab it can reach — can post here too. Only the
+      // frame we embedded may write into this session's context.
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      const data = event.data as
+        | { protocol_version?: string; type?: string; payload?: unknown }
+        | null;
+      if (!data || data.protocol_version !== VIEWER_PROTOCOL_VERSION) return;
+      if (data.type === "viewer.ready") {
+        postInit();
+      } else if (data.type === "selection_changed") {
+        pushExternalViewerSelection(data.payload);
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [allowedOrigin, postInit]);
+
+  return (
+    <div className="h-full w-full overflow-hidden bg-[var(--background)]">
+      <iframe
+        ref={iframeRef}
+        src={url}
+        title={title || "Viewer"}
+        sandbox={sandbox}
+        referrerPolicy="no-referrer"
+        className="h-full w-full border-0"
+        // Backstop for the `viewer.ready` handshake. A `ready` sent before
+        // this component's listener exists (a warm iframe, a remount) is
+        // simply lost, and the tab would sit blank forever with nothing to
+        // retry it. `viewer.init` is idempotent, so sending it here as well
+        // costs at most a duplicate.
+        onLoad={postInit}
       />
     </div>
   );

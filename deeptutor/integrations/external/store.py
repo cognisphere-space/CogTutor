@@ -156,6 +156,22 @@ class ExternalIntegrationStore:
             )
             return cursor.rowcount == 1
 
+    def update_context_payload(self, context_id: str, payload: dict[str, Any]) -> bool:
+        """Overwrite a stored context's opaque payload in place.
+
+        Used only by the viewer-embed selection push (see router.py's
+        ``/context/payload``): the payload's shape and meaning are entirely
+        the embedder's business, this just persists whatever it sent. Leaves
+        ``session_id``/``bound_at`` untouched — this is a content update, not
+        a rebinding.
+        """
+        with self._connection() as connection:
+            cursor = connection.execute(
+                "UPDATE external_context SET payload_json = ? WHERE context_id = ?",
+                (json.dumps(payload, ensure_ascii=False), context_id),
+            )
+            return cursor.rowcount == 1
+
     def context_for_session(self, session_id: str) -> ExternalContext | None:
         with self._connection() as connection:
             row = connection.execute(

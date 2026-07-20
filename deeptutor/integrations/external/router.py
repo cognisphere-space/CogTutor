@@ -7,6 +7,7 @@ product that might fill that role.
 
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 from typing import Any
@@ -257,6 +258,73 @@ async def bind_context(
     return {"ok": bound, "context_id": context_id, "session_id": body.session_id}
 
 
+class ContextPayloadUpdateRequest(BaseModel):
+    # No context_id here either, for the same reason as ContextBindRequest:
+    # the caller is the viewer-embed bridge reacting to a cross-origin
+    # ``selection_changed`` postMessage, which never learns the id — only
+    # the httponly cookie does.
+    payload: dict[str, Any]
+
+
+# The payload is opaque, so nothing about its *shape* can be validated. Its
+# size can be: it is written whole into a SQLite cell on every selection
+# change, and the sender is a cross-origin page we do not control. A viewer
+# posting its entire node graph on each click would otherwise be free to grow
+# one row without bound.
+_MAX_CONTEXT_PAYLOAD_BYTES = 64 * 1024
+
+
+def _payload_size_or_413(payload: dict[str, Any]) -> int:
+    try:
+        encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        # Pydantic guarantees a dict, not that everything inside it survives
+        # JSON encoding. Answer 422 rather than let the store raise a 500.
+        raise HTTPException(
+            status_code=422, detail="Payload is not JSON-serialisable"
+        ) from exc
+    if len(encoded) > _MAX_CONTEXT_PAYLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Payload exceeds {_MAX_CONTEXT_PAYLOAD_BYTES} bytes",
+        )
+    return len(encoded)
+
+
+@router.post("/context/payload")
+async def update_context_payload(
+    body: ContextPayloadUpdateRequest,
+    dt_external_context: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    """Overwrite the bound context's opaque payload — the viewer-embed tab's
+    only way to "push" anything back into this session.
+
+    ``payload`` is never interpreted here; it is whatever the embedded
+    viewer's ``selection_changed`` message carried, stored verbatim so a
+    later turn's prompt (if configured to use it) sees the update. This is
+    deliberately the *only* direction the viewer embed can influence this
+    session — there is no reverse channel that lets this session push a
+    navigation command into the viewer.
+
+    Size is the one property of an opaque payload worth checking; see
+    ``_payload_size_or_413``. It runs before the cookie checks so a caller
+    gets told the payload is too big rather than a quiet ``ok: false``.
+    """
+    _payload_size_or_413(body.payload)
+    if not dt_external_context:
+        # A browser that never went through a handoff has nothing to update.
+        # Not an error (the viewer tab cannot know), but worth seeing when a
+        # deployment's pushes are silently going nowhere.
+        logger.debug("Ignoring context payload push: no handoff cookie")
+        return {"ok": False, "context_id": None}
+    store = get_external_store()
+    if store.get_context(dt_external_context) is None:
+        logger.debug("Ignoring context payload push: unknown context in cookie")
+        return {"ok": False, "context_id": None}
+    updated = store.update_context_payload(dt_external_context, body.payload)
+    return {"ok": updated, "context_id": dt_external_context}
+
+
 @router.get("/context/{context_id}")
 async def read_context(
     context_id: str,
@@ -281,6 +349,32 @@ async def viewer_config() -> dict[str, Any]:
         "allowed_origin": config.viewer_allowed_origin,
         "sandbox": config.viewer_sandbox,
     }
+
+
+@router.get("/viewer/handle")
+async def viewer_handle(
+    response: Response,
+    dt_external_context: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    """The one deliberate exposure of ``context_id`` to frontend JS.
+
+    The viewer tab embeds a cross-origin iframe and has to hand it a
+    ``context_id`` via ``postMessage`` to bootstrap it — that hop
+    fundamentally can't happen without the value passing through JS once, so
+    the httponly-cookie-only design used elsewhere doesn't apply here. Still
+    gated on holding the cookie: this only ever returns *this browser's own*
+    id, never lets one be looked up by anyone else's guess.
+
+    Explicitly uncacheable: the answer varies by a cookie no intermediary is
+    required to key on, and one cached copy handed to a second browser would
+    give away exactly the id this endpoint exists to keep per-browser.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    if not dt_external_context:
+        return {"context_id": None}
+    if get_external_store().get_context(dt_external_context) is None:
+        return {"context_id": None}
+    return {"context_id": dt_external_context}
 
 
 @router.get("/events/status")

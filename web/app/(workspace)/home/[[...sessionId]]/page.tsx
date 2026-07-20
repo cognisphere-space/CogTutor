@@ -415,6 +415,12 @@ export default function ChatPage() {
     setViewerOpen(true);
     viewerPanelRef.current?.focusActivityHome();
   }, [setViewerOpen]);
+  const handleViewerPanelClose = useCallback(() => {
+    setViewerOpen(false);
+  }, [setViewerOpen]);
+  const handleViewerPanelAutoOpen = useCallback(() => {
+    setViewerOpen(true);
+  }, [setViewerOpen]);
   const attachmentErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -2051,8 +2057,8 @@ export default function ChatPage() {
             sessionId={state.sessionId}
             activity={sessionActivity}
             configSection={capabilityConfigSection}
-            onClose={() => setViewerOpen(false)}
-            onAutoOpen={() => setViewerOpen(true)}
+            onClose={handleViewerPanelClose}
+            onAutoOpen={handleViewerPanelAutoOpen}
           />
         </div>
       </GeogebraTabProvider>

@@ -87,6 +87,27 @@ def test_bind_to_the_same_session_twice_is_a_no_op_refresh(
     assert again is True
 
 
+def test_update_context_payload_overwrites_without_disturbing_binding(
+    store: ExternalIntegrationStore,
+) -> None:
+    store.save_context(make_context("ctx-a", node="old"))
+    store.bind_context_to_session("ctx-a", "session-1")
+
+    updated = store.update_context_payload("ctx-a", {"node": "new"})
+
+    assert updated is True
+    loaded = store.get_context("ctx-a")
+    assert loaded is not None
+    assert loaded.payload == {"node": "new"}
+    assert store.context_for_session("session-1") is not None
+
+
+def test_update_context_payload_is_false_for_an_unknown_context(
+    store: ExternalIntegrationStore,
+) -> None:
+    assert store.update_context_payload("ctx-missing", {"node": "new"}) is False
+
+
 def test_only_one_session_claims_a_context(store: ExternalIntegrationStore) -> None:
     """The claim is a race by construction; it must at least be an atomic one."""
     store.save_context(make_context("ctx-only"))
@@ -566,6 +587,110 @@ def test_binding_without_a_context_id_or_cookie_is_a_no_op(client) -> None:
         "session_id": "session-1",
     }
     assert store.context_for_session("session-1") is None
+
+
+def test_viewer_handle_returns_the_cookie_context_id(client) -> None:
+    """The one endpoint allowed to hand context_id to frontend JS — needed to
+    bootstrap the cross-origin viewer iframe via postMessage."""
+    test_client, store = client
+    store.save_context(make_context("ctx-handle"))
+    test_client.cookies.set("dt_external_context", "ctx-handle")
+
+    response = test_client.get("/api/v1/external/viewer/handle")
+
+    assert response.status_code == 200
+    assert response.json() == {"context_id": "ctx-handle"}
+    # Cookie-dependent and per-browser: one cached copy would hand this
+    # browser's id to the next one.
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_viewer_handle_is_null_without_a_cookie(client) -> None:
+    test_client, _ = client
+
+    response = test_client.get("/api/v1/external/viewer/handle")
+
+    assert response.json() == {"context_id": None}
+
+
+def test_viewer_handle_is_null_for_a_stale_or_unknown_context(client) -> None:
+    test_client, _ = client
+    test_client.cookies.set("dt_external_context", "ctx-gone")
+
+    response = test_client.get("/api/v1/external/viewer/handle")
+
+    assert response.json() == {"context_id": None}
+
+
+def test_context_payload_update_requires_the_handoff_cookie(client) -> None:
+    test_client, store = client
+    store.save_context(make_context("ctx-1", node="old"))
+
+    response = test_client.post(
+        "/api/v1/external/context/payload", json={"payload": {"node": "new"}}
+    )
+
+    assert response.json() == {"ok": False, "context_id": None}
+    assert store.get_context("ctx-1").payload == {"node": "old"}
+
+
+def test_context_payload_update_overwrites_the_bound_context(client) -> None:
+    """The viewer embed's only way to push anything into this session: a
+    ``selection_changed`` message forwarded here as an opaque payload."""
+    test_client, store = client
+    store.save_context(make_context("ctx-1", node="old"))
+    test_client.cookies.set("dt_external_context", "ctx-1")
+
+    response = test_client.post(
+        "/api/v1/external/context/payload", json={"payload": {"node": "new"}}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "context_id": "ctx-1"}
+    assert store.get_context("ctx-1").payload == {"node": "new"}
+
+
+def test_context_payload_update_rejects_an_oversized_payload(client) -> None:
+    """The payload is opaque, so size is the only property we can police —
+    and it is rewritten into one row on every selection change."""
+    test_client, store = client
+    store.save_context(make_context("ctx-1", node="old"))
+    test_client.cookies.set("dt_external_context", "ctx-1")
+
+    response = test_client.post(
+        "/api/v1/external/context/payload",
+        json={"payload": {"blob": "x" * 200_000}},
+    )
+
+    assert response.status_code == 413
+    assert store.get_context("ctx-1").payload == {"node": "old"}
+
+
+def test_context_payload_update_rejects_a_non_object_payload(client) -> None:
+    test_client, store = client
+    store.save_context(make_context("ctx-1", node="old"))
+    test_client.cookies.set("dt_external_context", "ctx-1")
+
+    response = test_client.post(
+        "/api/v1/external/context/payload", json={"payload": ["not", "an", "object"]}
+    )
+
+    assert response.status_code == 422
+    assert store.get_context("ctx-1").payload == {"node": "old"}
+
+
+def test_context_payload_update_is_ignored_for_a_deleted_context(client) -> None:
+    """The cookie outlives the row it names — a purge, or a store reset."""
+    test_client, store = client
+    test_client.cookies.set("dt_external_context", "ctx-gone")
+
+    response = test_client.post(
+        "/api/v1/external/context/payload", json={"payload": {"node": "new"}}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": False, "context_id": None}
+    assert store.get_context("ctx-gone") is None
 
 
 # -------------------------------------------------------------------- contract
