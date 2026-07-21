@@ -200,6 +200,9 @@ export function SidebarShell({
             href={brandMark ? brandMark.href : "/"}
             aria-label={brandMark ? t("Knowledge planet") : "DeepTutor"}
             className="flex items-center justify-center transition-opacity duration-150 group-hover/sb:opacity-0"
+            {...(brandMark && /^https?:\/\//i.test(brandMark.href)
+              ? { target: "_blank" as const, rel: "noreferrer noopener" }
+              : {})}
           >
             {brandMark ? (
               <BrandMarkCanvas variant="icon" points={brandMark.points} className="rounded-md" />
@@ -337,6 +340,9 @@ export function SidebarShell({
           href={brandMark ? brandMark.href : "/"}
           aria-label={brandMark ? t("Knowledge planet") : "DeepTutor"}
           className="group flex items-center gap-1.5"
+          {...(brandMark && /^https?:\/\//i.test(brandMark.href)
+            ? { target: "_blank" as const, rel: "noreferrer noopener" }
+            : {})}
         >
           {brandMark ? (
             <BrandMarkCanvas
