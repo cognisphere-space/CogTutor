@@ -746,7 +746,7 @@ function DraggableRatioBar({
             key={`boundary-${qt}`}
             role="separator"
             aria-orientation="vertical"
-            aria-label="Drag to adjust ratio"
+            aria-label="拖动调整比例"
             style={{ left: `${leftPct}%` }}
             onPointerDown={handleBoundaryPointerDown(i)}
             onPointerMove={handlePointerMove}

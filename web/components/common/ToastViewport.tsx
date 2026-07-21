@@ -56,7 +56,7 @@ export default function ToastViewport() {
             type="button"
             onClick={() => dismiss(toast.id)}
             className="rounded p-0.5 opacity-60 transition-opacity hover:opacity-100"
-            aria-label="Dismiss"
+            aria-label="关闭"
           >
             <X size={14} strokeWidth={1.8} />
           </button>

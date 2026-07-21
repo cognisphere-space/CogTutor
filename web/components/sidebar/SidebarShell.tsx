@@ -319,8 +319,8 @@ export function SidebarShell({
             href={GITHUB_REPO_URL}
             target="_blank"
             rel="noreferrer noopener"
-            title="GitHub"
-            aria-label="GitHub"
+            title="GitHub 仓库"
+            aria-label="GitHub 仓库"
             className="flex h-9 w-9 items-center justify-center rounded-xl text-[var(--muted-foreground)]/70 transition-colors hover:bg-[var(--background)]/50 hover:text-[var(--foreground)]"
           >
             <Github size={15} strokeWidth={1.6} />
@@ -512,8 +512,8 @@ export function SidebarShell({
             href={GITHUB_REPO_URL}
             target="_blank"
             rel="noreferrer noopener"
-            title="GitHub"
-            aria-label="GitHub"
+            title="GitHub 仓库"
+            aria-label="GitHub 仓库"
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--muted-foreground)]/55 transition-colors hover:bg-[var(--background)]/50 hover:text-[var(--muted-foreground)]"
           >
             <Github size={13} strokeWidth={1.7} />

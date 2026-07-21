@@ -137,7 +137,7 @@ function JsonObjectField({
       />
       {invalid && (
         <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
-          Invalid JSON — value not applied.
+          JSON 无效，未应用。
         </p>
       )}
     </div>

@@ -90,7 +90,7 @@ function LoginPageContent() {
                          placeholder:text-[var(--muted-foreground)]
                          focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent
                          transition-shadow text-sm"
-              placeholder="you@example.com"
+              placeholder="you@example.com 或用户名"
             />
           </div>
 
@@ -151,7 +151,7 @@ function LoginPageContent() {
       </p>
 
       <p className="mt-3 text-center text-xs text-[var(--muted-foreground)]">
-        DeepTutor · Agent-Native Learning
+        CogTutor · 智能学习
       </p>
     </div>
   );
@@ -162,7 +162,7 @@ export default function LoginPage() {
     <Suspense
       fallback={
         <div className="w-full max-w-sm text-center text-sm text-[var(--muted-foreground)]">
-          Loading sign in...
+          正在加载登录页…
         </div>
       }
     >

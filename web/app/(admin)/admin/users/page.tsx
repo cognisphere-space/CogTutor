@@ -32,7 +32,7 @@ import Link from "next/link";
 function formatDate(iso: string): string {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleDateString(undefined, {
+    return new Date(iso).toLocaleDateString("zh-CN", {
       year: "numeric",
       month: "short",
       day: "numeric",
@@ -69,7 +69,7 @@ export default function AdminUsersPage() {
       const data = await listUsers();
       setUsers(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load users");
+      setError(e instanceof Error ? e.message : "加载用户失败");
     } finally {
       setLoading(false);
     }
@@ -108,11 +108,11 @@ export default function AdminUsersPage() {
     setCreateError("");
     const username = createUsername.trim();
     if (!username) {
-      setCreateError("Username is required.");
+      setCreateError("请填写用户名。");
       return;
     }
     if (createPassword.length < 8) {
-      setCreateError("Password must be at least 8 characters.");
+      setCreateError("密码至少 8 位。");
       return;
     }
     setCreateSubmitting(true);
@@ -121,7 +121,7 @@ export default function AdminUsersPage() {
       setShowCreateDialog(false);
       await load();
     } catch (e) {
-      setCreateError(e instanceof Error ? e.message : "Failed to create user");
+      setCreateError(e instanceof Error ? e.message : "创建用户失败");
     } finally {
       setCreateSubmitting(false);
     }
@@ -157,8 +157,8 @@ export default function AdminUsersPage() {
         e instanceof Error
           ? e.message
           : confirmTarget.kind === "delete"
-            ? "Failed to delete user"
-            : "Failed to update role",
+            ? "删除用户失败"
+            : "更新角色失败",
       );
     } finally {
       setConfirmBusy(false);
@@ -186,15 +186,15 @@ export default function AdminUsersPage() {
             className="mb-4 inline-flex items-center gap-1.5 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
           >
             <ArrowLeft size={16} />
-            Back
+            返回
           </Link>
           <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="font-serif text-xl font-semibold text-[var(--foreground)]">
-                User Management
+                用户管理
               </h1>
               <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
-                Manage registered accounts
+                管理已注册账号
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -205,7 +205,7 @@ export default function AdminUsersPage() {
                            hover:bg-[var(--card)] transition-colors"
               >
                 <UserPlus size={14} />
-                Add user
+                添加用户
               </button>
               <button
                 onClick={load}
@@ -219,7 +219,7 @@ export default function AdminUsersPage() {
                   size={14}
                   className={loading ? "animate-spin" : ""}
                 />
-                Refresh
+                刷新
               </button>
             </div>
           </div>
@@ -242,8 +242,8 @@ export default function AdminUsersPage() {
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search users…"
-                aria-label="Search users"
+                placeholder="搜索用户…"
+                aria-label="搜索用户"
                 className="w-full rounded-lg border border-[var(--border)] bg-[var(--card)] py-2 pl-9 pr-3 text-sm
                            text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]/70
                            outline-none focus:border-[var(--ring)] transition-colors"
@@ -251,8 +251,8 @@ export default function AdminUsersPage() {
             </div>
             <span className="shrink-0 text-xs text-[var(--muted-foreground)]">
               {normalizedQuery
-                ? `${filteredUsers.length} of ${users.length}`
-                : `${users.length} ${users.length === 1 ? "user" : "users"}`}
+                ? `${filteredUsers.length} / ${users.length}`
+                : `${users.length} 位用户`}
             </span>
           </div>
         )}
@@ -286,10 +286,10 @@ export default function AdminUsersPage() {
                 className="text-[var(--muted-foreground)]/50"
               />
               <p className="mt-3 text-sm font-medium text-[var(--foreground)]">
-                No users yet
+                暂无用户
               </p>
               <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                Accounts you create will appear here.
+                创建的账号会显示在这里。
               </p>
               <button
                 onClick={openCreateDialog}
@@ -298,7 +298,7 @@ export default function AdminUsersPage() {
                            hover:bg-[var(--background)]/60 transition-colors"
               >
                 <UserPlus size={14} />
-                Add user
+                添加用户
               </button>
             </div>
           ) : filteredUsers.length === 0 ? (
@@ -309,7 +309,7 @@ export default function AdminUsersPage() {
                 className="text-[var(--muted-foreground)]/50"
               />
               <p className="mt-3 text-sm font-medium text-[var(--foreground)]">
-                No users match &ldquo;{query.trim()}&rdquo;
+                没有匹配「{query.trim()}」的用户
               </p>
               <button
                 onClick={() => setQuery("")}
@@ -317,17 +317,17 @@ export default function AdminUsersPage() {
                            text-[var(--muted-foreground)] hover:text-[var(--foreground)]
                            hover:bg-[var(--background)]/60 transition-colors"
               >
-                Clear search
+                清除搜索
               </button>
             </div>
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--border)] text-left text-xs text-[var(--muted-foreground)] uppercase tracking-wider">
-                  <th className="px-5 py-3 font-medium">Username</th>
-                  <th className="px-5 py-3 font-medium">Role</th>
-                  <th className="px-5 py-3 font-medium">Joined</th>
-                  <th className="px-5 py-3 font-medium text-right">Actions</th>
+                  <th className="px-5 py-3 font-medium">用户名</th>
+                  <th className="px-5 py-3 font-medium">角色</th>
+                  <th className="px-5 py-3 font-medium">加入时间</th>
+                  <th className="px-5 py-3 font-medium text-right">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
@@ -351,7 +351,7 @@ export default function AdminUsersPage() {
                               {user.username}
                               {isSelf && (
                                 <span className="ml-2 text-xs font-normal text-[var(--muted-foreground)]">
-                                  (you)
+                                  （我）
                                 </span>
                               )}
                             </span>
@@ -369,7 +369,7 @@ export default function AdminUsersPage() {
                             {isAdmin && (
                               <ShieldCheck size={11} strokeWidth={2} />
                             )}
-                            {isAdmin ? "Admin" : "User"}
+                            {isAdmin ? "管理员" : "用户"}
                           </span>
                         </td>
                         <td className="px-5 py-3.5 text-[var(--muted-foreground)]">
@@ -384,7 +384,7 @@ export default function AdminUsersPage() {
                                     current === user.id ? null : user.id,
                                   )
                                 }
-                                title="Manage assignments"
+                                title="管理权限分配"
                                 className="rounded-lg p-1.5 text-[var(--muted-foreground)]
                                          hover:bg-[var(--background)] hover:text-[var(--foreground)]
                                          transition-colors"
@@ -402,10 +402,10 @@ export default function AdminUsersPage() {
                               disabled={isSelf}
                               title={
                                 isSelf
-                                  ? "Cannot change your own role"
+                                  ? "不能修改自己的角色"
                                   : user.role === "admin"
-                                    ? "Demote to user"
-                                    : "Promote to admin"
+                                    ? "降为普通用户"
+                                    : "升为管理员"
                               }
                               className="rounded-lg p-1.5 text-[var(--muted-foreground)]
                                        hover:bg-[var(--background)] hover:text-[var(--foreground)]
@@ -424,8 +424,8 @@ export default function AdminUsersPage() {
                               disabled={isSelf}
                               title={
                                 isSelf
-                                  ? "Cannot delete your own account"
-                                  : `Delete ${user.username}`
+                                  ? "不能删除自己的账号"
+                                  : `删除 ${user.username}`
                               }
                               className="rounded-lg p-1.5 text-[var(--muted-foreground)]
                                        hover:bg-red-500/10 hover:text-red-500
@@ -452,7 +452,7 @@ export default function AdminUsersPage() {
         </div>
 
         <p className="mt-8 text-center text-xs text-[var(--muted-foreground)]">
-          DeepTutor Admin · User Management
+          CogTutor 管理 · 用户管理
         </p>
       </div>
 
@@ -460,25 +460,25 @@ export default function AdminUsersPage() {
         open={confirmTarget !== null}
         title={
           confirmTarget?.kind === "delete"
-            ? "Delete user"
+            ? "删除用户"
             : confirmTarget?.kind === "promote"
-              ? "Promote to admin"
-              : "Demote to user"
+              ? "升为管理员"
+              : "降为普通用户"
         }
         tone={confirmTarget?.kind === "delete" ? "danger" : "default"}
         confirmLabel={
           confirmTarget?.kind === "delete"
-            ? "Delete user"
+            ? "删除用户"
             : confirmTarget?.kind === "promote"
-              ? "Promote"
-              : "Demote"
+              ? "升级"
+              : "降级"
         }
         busyLabel={
           confirmTarget?.kind === "delete"
-            ? "Deleting…"
+            ? "删除中…"
             : confirmTarget?.kind === "promote"
-              ? "Promoting…"
-              : "Demoting…"
+              ? "升级中…"
+              : "降级中…"
         }
         busy={confirmBusy}
         onConfirm={handleConfirmAction}
@@ -499,17 +499,17 @@ export default function AdminUsersPage() {
                   {confirmTarget.user.username}
                 </p>
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  {confirmTarget.user.role === "admin" ? "Admin" : "User"} ·
-                  joined {formatDate(confirmTarget.user.created_at)}
+                  {confirmTarget.user.role === "admin" ? "管理员" : "用户"} ·
+                  加入于 {formatDate(confirmTarget.user.created_at)}
                 </p>
               </div>
             </div>
             <p className="mt-3">
               {confirmTarget.kind === "delete"
-                ? "This permanently removes the account and its assignments. This cannot be undone."
+                ? "将永久删除该账号及其权限分配，且无法恢复。"
                 : confirmTarget.kind === "promote"
-                  ? "Admins can manage users and assignments, and work in the shared main workspace."
-                  : "They will lose access to the admin area and switch to their own assigned workspace."}
+                  ? "管理员可管理用户与权限分配，并使用共享主工作区。"
+                  : "对方将失去管理区权限，并切换到各自分配的工作区。"}
             </p>
           </>
         )}
@@ -529,21 +529,21 @@ export default function AdminUsersPage() {
           >
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-base font-semibold text-[var(--foreground)]">
-                Add user
+                添加用户
               </h2>
               <button
                 type="button"
                 onClick={closeCreateDialog}
                 disabled={createSubmitting}
                 className="rounded-md p-1 text-[var(--muted-foreground)] hover:bg-[var(--background)] hover:text-[var(--foreground)] disabled:opacity-40"
-                aria-label="Close"
+                aria-label="关闭"
               >
                 <X size={16} />
               </button>
             </div>
 
             <label className="mb-3 block text-xs text-[var(--muted-foreground)]">
-              Username (or email)
+              用户名（或邮箱）
               <input
                 type="text"
                 value={createUsername}
@@ -556,7 +556,7 @@ export default function AdminUsersPage() {
             </label>
 
             <label className="mb-4 block text-xs text-[var(--muted-foreground)]">
-              Password (≥ 8 chars)
+              密码（至少 8 位）
               <input
                 type="password"
                 value={createPassword}
@@ -578,14 +578,14 @@ export default function AdminUsersPage() {
                 disabled={createSubmitting}
                 className="rounded-lg px-3 py-1.5 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] disabled:opacity-40"
               >
-                Cancel
+                取消
               </button>
               <button
                 type="submit"
                 disabled={createSubmitting}
                 className="rounded-lg bg-[var(--foreground)] px-3 py-1.5 text-sm font-medium text-[var(--background)] hover:opacity-90 disabled:opacity-40"
               >
-                {createSubmitting ? "Creating…" : "Create"}
+                {createSubmitting ? "创建中…" : "创建"}
               </button>
             </div>
           </form>

@@ -272,7 +272,7 @@ export function useMemoryRun(layer: "L2" | "L3", key: string) {
             budget: args.budget ?? null,
             iterations: args.iterations ?? null,
             llm_selection: args.llmSelection ?? null,
-            language: args.language ?? "en",
+            language: args.language ?? "zh",
           }),
         });
         if (!res.ok) {

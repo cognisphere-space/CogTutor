@@ -27,8 +27,8 @@ export function AdminLink({ collapsed = false }: AdminLinkProps) {
               ? "bg-[var(--primary)]/10 text-[var(--primary)]"
               : "text-[var(--muted-foreground)] hover:bg-[var(--background)]/50 hover:text-[var(--foreground)]"
           }`}
-        aria-label="Admin"
-        title="Admin — User Management"
+        aria-label="管理"
+        title="管理 — 用户管理"
       >
         <ShieldCheck size={16} strokeWidth={1.5} />
       </Link>
@@ -46,7 +46,7 @@ export function AdminLink({ collapsed = false }: AdminLinkProps) {
         }`}
     >
       <ShieldCheck size={16} strokeWidth={1.5} />
-      <span>Admin</span>
+      <span>管理</span>
     </Link>
   );
 }

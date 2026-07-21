@@ -256,7 +256,7 @@ function createSessionEntry(
     messages: [],
     isStreaming: false,
     currentStage: "",
-    language: typeof window === "undefined" ? "en" : readStoredLanguage(),
+    language: typeof window === "undefined" ? "zh" : readStoredLanguage(),
     status: "idle",
     activeTurnId: null,
     lastSeq: 0,
@@ -880,7 +880,7 @@ function hydrateRequestSnapshot(
         : message.capability || "",
     enabledTools: asStringArray(stored.enabledTools),
     knowledgeBases: asStringArray(stored.knowledgeBases),
-    language: typeof stored.language === "string" ? stored.language : "en",
+    language: typeof stored.language === "string" ? stored.language : "zh",
     ...(attachments.length ? { attachments } : {}),
   };
 

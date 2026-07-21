@@ -30,7 +30,7 @@ export function ConfirmDialog({
   title,
   children,
   confirmLabel,
-  cancelLabel = "Cancel",
+  cancelLabel = "取消",
   tone = "default",
   busy = false,
   busyLabel,
@@ -71,7 +71,7 @@ export function ConfirmDialog({
             onClick={onCancel}
             disabled={busy}
             className="rounded-md p-1 text-[var(--muted-foreground)] hover:bg-[var(--background)] hover:text-[var(--foreground)] disabled:opacity-40"
-            aria-label="Close"
+            aria-label="关闭"
           >
             <X size={16} />
           </button>
